@@ -41,7 +41,7 @@ impl From<TrySendError<Request>> for ClientError {
 /// from the broker, i.e. move ahead.
 #[derive(Clone, Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<Request>,
+    pub(crate) request_tx: Sender<Request>,
 }
 
 impl AsyncClient {
@@ -49,10 +49,8 @@ impl AsyncClient {
     ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let eventloop = EventLoop::new(options, cap);
-        let request_tx = eventloop.requests_tx.clone();
-
-        let client = AsyncClient { request_tx };
+        let eventloop = EventLoop::new(options);
+        let client = eventloop.client(cap);
 
         (client, eventloop)
     }
