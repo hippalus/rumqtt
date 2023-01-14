@@ -144,7 +144,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
 
     // Start sending publishes
     task::spawn(async move {
-        start_requests(10, QoS::AtMostOnce, 1, client).await;
+        start_requests(15, QoS::AtMostOnce, 1, client).await;
     });
 
     // start the eventloop
