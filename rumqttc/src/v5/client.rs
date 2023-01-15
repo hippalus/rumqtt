@@ -35,14 +35,14 @@ impl From<TrySendError<Request>> for ClientError {
 
 /// An asynchronous client, communicates with MQTT `EventLoop`.
 ///
-/// This is cloneable and can be used to asynchronously [`publish`](`AsyncClient::publish`),
-/// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`, which is to be polled parallelly.
+/// Used to asynchronously [`publish`](`AsyncClient::publish`), [`subscribe`](`AsyncClient::subscribe`)
+/// through the `EventLoop`, which is to be polled parallelly.
 ///
 /// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets
 /// from the broker, i.e. move ahead.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AsyncClient {
-    request_tx: Sender<Request>,
+    pub(crate) request_tx: Sender<Request>,
 }
 
 impl AsyncClient {
@@ -50,10 +50,8 @@ impl AsyncClient {
     ///
     /// `cap` specifies the capacity of the bounded async channel.
     pub fn new(options: MqttOptions, cap: usize) -> (AsyncClient, EventLoop) {
-        let eventloop = EventLoop::new(options, cap);
-        let request_tx = eventloop.requests_tx.clone();
-
-        let client = AsyncClient { request_tx };
+        let eventloop = EventLoop::new(options);
+        let client = eventloop.client(cap);
 
         (client, eventloop)
     }
@@ -233,15 +231,14 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 
 /// A synchronous client, communicates with MQTT `EventLoop`.
 ///
-/// This is cloneable and can be used to synchronously [`publish`](`AsyncClient::publish`),
-/// [`subscribe`](`AsyncClient::subscribe`) through the `EventLoop`/`Connection`, which is to be polled in parallel
-/// by iterating over the object returned by [`Connection.iter()`](Connection::iter) in a separate thread.
+/// Used to synchronously [`publish`](`AsyncClient::publish`), [`subscribe`](`AsyncClient::subscribe`)
+/// through the `EventLoop`/`Connection`, which is to be polled in parallel by iterating over the object
+/// returned by [`Connection.iter()`](Connection::iter) in a separate thread.
 ///
 /// **NOTE**: The `EventLoop`/`Connection` must be regularly polled(`.next()` in case of `Connection`) in order
 /// to send, receive and process packets from the broker, i.e. move ahead.
 ///
 /// An asynchronous channel handle can also be extracted if necessary.
-#[derive(Clone)]
 pub struct Client {
     client: AsyncClient,
 }

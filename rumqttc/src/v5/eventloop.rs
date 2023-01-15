@@ -1,6 +1,8 @@
 use super::framed::Network;
 use super::mqttbytes::{v5::*, *};
-use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
+use super::{
+    AsyncClient, Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport,
+};
 use crate::eventloop::socket_connect;
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
@@ -9,7 +11,10 @@ use crate::tls;
 use async_tungstenite::tokio::connect_async;
 #[cfg(all(feature = "use-rustls", feature = "websocket"))]
 use async_tungstenite::tokio::connect_async_with_tls_connector;
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver};
+use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 use tokio::select;
@@ -59,9 +64,7 @@ pub struct EventLoop {
     /// Current state of the connection
     pub state: MqttState,
     /// Request stream
-    requests_rx: Receiver<Request>,
-    /// Requests handle to send requests
-    pub(crate) requests_tx: Sender<Request>,
+    futures: FuturesUnordered<BoxFuture<'static, Option<(Receiver<Request>, Request)>>>,
     /// Pending packets from last session
     pub pending: IntoIter<Request>,
     /// Network connection to the broker
@@ -82,8 +85,7 @@ impl EventLoop {
     ///
     /// When connection encounters critical errors (like auth failure), user has a choice to
     /// access and update `options`, `state` and `requests`.
-    pub fn new(options: MqttOptions, cap: usize) -> EventLoop {
-        let (requests_tx, requests_rx) = bounded(cap);
+    pub fn new(options: MqttOptions) -> EventLoop {
         let pending = Vec::new();
         let pending = pending.into_iter();
         let max_inflight = options.inflight;
@@ -92,8 +94,7 @@ impl EventLoop {
         EventLoop {
             options,
             state: MqttState::new(max_inflight, manual_acks),
-            requests_tx,
-            requests_rx,
+            futures: FuturesUnordered::new(),
             pending,
             network: None,
             keepalive_timeout: None,
@@ -105,6 +106,14 @@ impl EventLoop {
         self.keepalive_timeout = None;
         let pending = self.state.clean();
         self.pending = pending.into_iter();
+    }
+
+    pub fn client(&self, cap: usize) -> AsyncClient {
+        let (request_tx, request_rx) = bounded(cap);
+        let future = Box::pin(next_recv(request_rx));
+        self.futures.push(future);
+
+        AsyncClient { request_tx }
     }
 
     /// Yields Next notification or outgoing request and periodically pings
@@ -184,13 +193,15 @@ impl EventLoop {
             // After collision with pkid 1        -> [1b ,2, x, 4, 5].
             // 1a is saved to state and event loop is set to collision mode stopping new
             // outgoing requests (along with 1b).
-            o = self.requests_rx.recv_async(), if !inflight_full && !pending && !collision => match o {
-                Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
-                    network.flush(&mut self.state.write).await?;
-                    Ok(self.state.events.pop_front().unwrap())
-                }
-                Err(_) => Err(ConnectionError::RequestsDone),
+            Some(o) = self.futures.next(), if !self.futures.is_empty() && !inflight_full && !pending && !collision => {
+                let (rx, request) = o.ok_or(ConnectionError::RequestsDone)?;
+                self.state.handle_outgoing_packet(request)?;
+                network.flush(&mut self.state.write).await?;
+
+                let future = Box::pin(next_recv(rx));
+                self.futures.push(future);
+
+                Ok(self.state.events.pop_front().unwrap())
             },
             // Handle the next pending packet from previous session. Disable
             // this branch when done with all the pending packets
@@ -211,6 +222,12 @@ impl EventLoop {
             }
         }
     }
+}
+
+async fn next_recv(rx: Receiver<Request>) -> Option<(Receiver<Request>, Request)> {
+    let next = rx.recv_async().await.ok()?;
+
+    Some((rx, next))
 }
 
 /// This stream internally processes requests from the request stream provided to the eventloop

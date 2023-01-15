@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // create new broker connection
-    let (client, mut eventloop) = create_conn();
+    let (_, mut eventloop) = create_conn();
 
     while let Ok(event) = eventloop.poll().await {
         println!("{:?}", event);
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             };
             // this time we will ack incoming publishes.
             // Its important not to block notifier as this can cause deadlock.
-            let c = client.clone();
+            let c = eventloop.client(1);
             tokio::spawn(async move {
                 c.ack(&publish).await.unwrap();
             });
