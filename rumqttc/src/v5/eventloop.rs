@@ -108,6 +108,7 @@ impl EventLoop {
         self.pending = pending.into_iter();
     }
 
+    /// Create an [`AsyncClient`] channel to communicate with the `EventLoop`
     pub fn client(&self, cap: usize) -> AsyncClient {
         let (request_tx, request_rx) = bounded(cap);
         let future = Box::pin(next_recv(request_rx));
@@ -224,6 +225,7 @@ impl EventLoop {
     }
 }
 
+// NOTE: `recv_async` resolves into an error only when the sender is dropped.
 async fn next_recv(rx: Receiver<Request>) -> Option<(Receiver<Request>, Request)> {
     let next = rx.recv_async().await.ok()?;
 
