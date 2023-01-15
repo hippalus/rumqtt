@@ -5,7 +5,7 @@ use std::error::Error;
 use std::time::Duration;
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new("test-1", "broker.emqx.io", 1883);
     mqttoptions
         .set_keep_alive(Duration::from_secs(5))
         .set_manual_acks(true)
@@ -27,9 +27,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await
         .unwrap();
 
+    let requester = eventloop.client(10);
     task::spawn(async move {
         // send some messages to example topic and disconnect
-        requests(client.clone()).await;
+        requests(requester).await;
         client.disconnect().await.unwrap();
     });
 
@@ -52,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // create new broker connection
-    let (client, mut eventloop) = create_conn();
+    let (_, mut eventloop) = create_conn();
 
     loop {
         // previously published messages should be republished after reconnection.
@@ -70,7 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if let Ok(Event::Incoming(Incoming::Publish(publish))) = event {
             // this time we will ack incoming publishes.
             // Its important not to block eventloop as this can cause deadlock.
-            let c = client.clone();
+            let c = eventloop.client(1);
             tokio::spawn(async move {
                 c.ack(&publish).await.unwrap();
             });
