@@ -205,14 +205,15 @@ impl EventLoop {
             // outgoing requests (along with 1b).
             Some(o) = self.futures.next(), if !self.futures.is_empty() && !inflight_full && !pending && !collision => {
                 let (rx, request) = o.ok_or(ConnectionError::RequestsDone)?;
+
+                let future = Box::pin(next_recv(rx));
+                self.futures.push(future);
+
                 self.state.handle_outgoing_packet(request)?;
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                     Ok(inner) => inner?,
                     Err(_)=> return Err(ConnectionError::FlushTimeout),
                 };
-
-                let future = Box::pin(next_recv(rx));
-                self.futures.push(future);
 
                 Ok(self.state.events.pop_front().unwrap())
             },
