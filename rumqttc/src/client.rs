@@ -39,7 +39,7 @@ impl From<TrySendError<Request>> for ClientError {
 ///
 /// **NOTE**: The `EventLoop` must be regularly polled in order to send, receive and process packets
 /// from the broker, i.e. move ahead.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AsyncClient {
     pub(crate) request_tx: Sender<Request>,
 }
@@ -232,6 +232,7 @@ fn get_ack_req(publish: &Publish) -> Option<Request> {
 /// to send, receive and process packets from the broker, i.e. move ahead.
 ///
 /// An asynchronous channel handle can also be extracted if necessary.
+#[derive(Debug, Clone)]
 pub struct Client {
     client: AsyncClient,
 }
