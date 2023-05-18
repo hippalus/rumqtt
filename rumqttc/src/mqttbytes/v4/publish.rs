@@ -35,13 +35,17 @@ impl Publish {
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         let len = 2 + self.topic.len() + self.payload.len();
         if self.qos != QoS::AtMostOnce && self.pkid != 0 {
             len + 2
         } else {
             len
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Self, Error> {

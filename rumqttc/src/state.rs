@@ -140,8 +140,8 @@ impl MqttState {
 
     /// Consolidates handling of all outgoing mqtt packet logic. Returns a packet which should
     /// be put on to the network by the eventloop
-    pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<(), StateError> {
-        match request {
+    pub fn handle_outgoing_packet(&mut self, request: Request) -> Result<usize, StateError> {
+        let packet_size = match request {
             Request::Publish(publish) => self.outgoing_publish(publish)?,
             Request::PubRel(pubrel) => self.outgoing_pubrel(pubrel)?,
             Request::Subscribe(subscribe) => self.outgoing_subscribe(subscribe)?,
@@ -154,7 +154,7 @@ impl MqttState {
         };
 
         self.last_outgoing = Instant::now();
-        Ok(())
+        Ok(packet_size)
     }
 
     /// Consolidates handling of all incoming mqtt packets. Returns a `Notification` which for the
@@ -321,7 +321,7 @@ impl MqttState {
 
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
-    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<(), StateError> {
+    fn outgoing_publish(&mut self, mut publish: Publish) -> Result<usize, StateError> {
         if publish.qos != QoS::AtMostOnce {
             if publish.pkid == 0 {
                 publish.pkid = self.next_pkid();
@@ -335,10 +335,11 @@ impl MqttState {
                 .is_some()
             {
                 info!("Collision on packet id = {:?}", publish.pkid);
+                let packet_size = publish.len();
                 self.collision = Some(publish);
                 let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
                 self.events.push_back(event);
-                return Ok(());
+                return Ok(packet_size);
             }
 
             // if there is an existing publish at this pkid, this implies that broker hasn't acked this
@@ -354,41 +355,45 @@ impl MqttState {
             publish.payload.len()
         );
 
-        publish.write(&mut self.write)?;
+        let packet_size = publish.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<(), StateError> {
+    fn outgoing_pubrel(&mut self, pubrel: PubRel) -> Result<usize, StateError> {
         let pubrel = self.save_pubrel(pubrel)?;
 
         debug!("Pubrel. Pkid = {}", pubrel.pkid);
-        PubRel::new(pubrel.pkid).write(&mut self.write)?;
+        let packet_size = PubRel::new(pubrel.pkid).write(&mut self.write)?;
 
         let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_puback(&mut self, puback: PubAck) -> Result<(), StateError> {
-        puback.write(&mut self.write)?;
+    fn outgoing_puback(&mut self, puback: PubAck) -> Result<usize, StateError> {
+        let packet_size = puback.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PubAck(puback.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<(), StateError> {
-        pubrec.write(&mut self.write)?;
+    fn outgoing_pubrec(&mut self, pubrec: PubRec) -> Result<usize, StateError> {
+        let packet_size = pubrec.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PubRec(pubrec.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
     /// check when the last control packet/pingreq packet is received and return
     /// the status which tells if keep alive time has exceeded
     /// NOTE: status will be checked for zero keepalive times also
-    fn outgoing_ping(&mut self) -> Result<(), StateError> {
+    fn outgoing_ping(&mut self) -> Result<usize, StateError> {
         let elapsed_in = self.last_incoming.elapsed();
         let elapsed_out = self.last_outgoing.elapsed();
 
@@ -414,13 +419,14 @@ impl MqttState {
             elapsed_out.as_millis()
         );
 
-        PingReq.write(&mut self.write)?;
+        let packet_size = PingReq.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::PingReq);
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<(), StateError> {
+    fn outgoing_subscribe(&mut self, mut subscription: Subscribe) -> Result<usize, StateError> {
         if subscription.filters.is_empty() {
             return Err(StateError::EmptySubscription);
         }
@@ -433,13 +439,14 @@ impl MqttState {
             subscription.filters, subscription.pkid
         );
 
-        subscription.write(&mut self.write)?;
+        let packet_size = subscription.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Subscribe(subscription.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<(), StateError> {
+    fn outgoing_unsubscribe(&mut self, mut unsub: Unsubscribe) -> Result<usize, StateError> {
         let pkid = self.next_pkid();
         unsub.pkid = pkid;
 
@@ -448,19 +455,21 @@ impl MqttState {
             unsub.topics, unsub.pkid
         );
 
-        unsub.write(&mut self.write)?;
+        let packet_size = unsub.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Unsubscribe(unsub.pkid));
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
-    fn outgoing_disconnect(&mut self) -> Result<(), StateError> {
+    fn outgoing_disconnect(&mut self) -> Result<usize, StateError> {
         debug!("Disconnect");
 
-        Disconnect.write(&mut self.write)?;
+        let packet_size = Disconnect.write(&mut self.write)?;
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
-        Ok(())
+
+        Ok(packet_size)
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {

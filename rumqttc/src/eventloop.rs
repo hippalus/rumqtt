@@ -35,10 +35,10 @@ use crate::proxy::ProxyError;
 pub enum ConnectionError {
     #[error("Mqtt state: {0}")]
     MqttState(#[from] StateError),
-    #[error("Network timeout")]
-    NetworkTimeout,
-    #[error("Flush timeout")]
-    FlushTimeout,
+    #[error("Connection timeout")]
+    ConnectionTimeout,
+    #[error("Flush timeout: packet size {0} bytes")]
+    FlushTimeout(usize),
     #[cfg(feature = "websocket")]
     #[error("Websocket: {0}")]
     Websocket(#[from] async_tungstenite::tungstenite::error::Error),
@@ -134,7 +134,7 @@ impl EventLoop {
             .await
             {
                 Ok(inner) => inner?,
-                Err(_) => return Err(ConnectionError::NetworkTimeout),
+                Err(_) => return Err(ConnectionError::ConnectionTimeout),
             };
             self.network = Some(network);
 
@@ -176,7 +176,8 @@ impl EventLoop {
                 // flush all the acks and return first incoming packet
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                     Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                    // Ack packets are 2 bytes long
+                    Err(_)=> return Err(ConnectionError::FlushTimeout(2)),
                 };
                 Ok(self.state.events.pop_front().unwrap())
             },
@@ -214,10 +215,10 @@ impl EventLoop {
                 self.mqtt_options.pending_throttle
             ), if self.pending.len() > 0 || (!inflight_full && !collision) => match o {
                 Ok(request) => {
-                    self.state.handle_outgoing_packet(request)?;
+                    let packet_size = self.state.handle_outgoing_packet(request)?;
                     match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                         Ok(inner) => inner?,
-                        Err(_)=> return Err(ConnectionError::FlushTimeout),
+                        Err(_)=> return Err(ConnectionError::FlushTimeout(packet_size)),
                     };
                     Ok(self.state.events.pop_front().unwrap())
                 }
@@ -229,10 +230,10 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.mqtt_options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                let packet_size = self.state.handle_outgoing_packet(Request::PingReq)?;
                 match time::timeout(network_timeout, network.flush(&mut self.state.write)).await {
                     Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                    Err(_)=> return Err(ConnectionError::FlushTimeout(packet_size)),
                 };
                 Ok(self.state.events.pop_front().unwrap())
             }
