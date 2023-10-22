@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::{collections::HashMap, path::Path};
 
+use protocol::Protocol;
 use segments::Storage;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
@@ -44,9 +45,7 @@ use self::router::shared_subs::Strategy;
 pub struct Config {
     pub id: usize,
     pub router: RouterConfig,
-    pub v4: HashMap<String, ServerSettings>,
-    pub v5: Option<HashMap<String, ServerSettings>>,
-    pub ws: Option<HashMap<String, ServerSettings>>,
+    pub servers: HashMap<String, ServerSettings>,
     pub cluster: Option<ClusterSettings>,
     pub console: ConsoleSettings,
     pub bridge: Option<BridgeConfig>,
@@ -96,6 +95,13 @@ impl TlsConfig {
     }
 }
 
+#[derive(Debug, Copy, Clone, Default, Deserialize)]
+pub enum LinkType {
+    Websocket,
+    #[default]
+    Remote,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServerSettings {
     pub name: String,
@@ -103,6 +109,10 @@ pub struct ServerSettings {
     pub tls: Option<TlsConfig>,
     pub next_connection_delay_ms: u64,
     pub connections: ConnectionSettings,
+    #[serde(default)]
+    pub protocol: Protocol,
+    #[serde(default)]
+    pub link_type: LinkType,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -116,6 +126,8 @@ pub struct BridgeConfig {
     pub connections: ConnectionSettings,
     #[serde(default)]
     pub transport: Transport,
+    #[serde(default)]
+    pub protocol: Protocol,
 }
 
 #[derive(Debug, Deserialize, Clone)]

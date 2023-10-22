@@ -4,12 +4,10 @@ use crate::link::network::{Network, N};
 use crate::link::remote::{self, mqtt_connect, RemoteLink};
 use crate::link::{bridge, timer};
 use crate::local::LinkBuilder;
-use crate::protocol::v4::V4;
-use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, ConnectionSettings, LinkType, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -58,6 +56,9 @@ pub enum Error {
     Accept(String),
     #[error("Remote error = {0}")]
     Remote(#[from] remote::Error),
+    #[cfg(not(feature = "websocket"))]
+    #[error("Websockets are not supported by this rumqttd binary")]
+    WebsocketsNotSupported,
 }
 
 pub struct Broker {
@@ -175,7 +176,7 @@ impl Broker {
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async move {
-                    if let Err(e) = bridge::start(bridge_config, router_tx, V4).await {
+                    if let Err(e) = bridge::start(bridge_config, router_tx).await {
                         error!(error=?e, "Bridge Link error");
                     };
                 });
@@ -183,55 +184,20 @@ impl Broker {
         }
 
         // Spawn servers in a separate thread.
-        for (_, config) in self.config.v4.clone() {
+        for (_, config) in self.config.servers.clone() {
             let server_thread = thread::Builder::new().name(config.name.clone());
-            let mut server = Server::new(config, self.router_tx.clone(), V4);
+            let protocol = config.protocol;
+            let mut server = Server::new(config, self.router_tx.clone());
             server_thread.spawn(move || {
                 let mut runtime = tokio::runtime::Builder::new_current_thread();
                 let runtime = runtime.enable_all().build().unwrap();
 
                 runtime.block_on(async {
-                    if let Err(e) = server.start(LinkType::Remote).await {
-                        error!(error=?e, "Server error - V4");
+                    if let Err(e) = dbg!(server.start().await) {
+                        error!(error=?e, "Server error - {protocol:?}");
                     }
                 });
             })?;
-        }
-
-        if let Some(v5_config) = &self.config.v5 {
-            for (_, config) in v5_config.clone() {
-                let server_thread = thread::Builder::new().name(config.name.clone());
-                let mut server = Server::new(config, self.router_tx.clone(), V5);
-                server_thread.spawn(move || {
-                    let mut runtime = tokio::runtime::Builder::new_current_thread();
-                    let runtime = runtime.enable_all().build().unwrap();
-
-                    runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Remote).await {
-                            error!(error=?e, "Server error - V5");
-                        }
-                    });
-                })?;
-            }
-        }
-
-        #[cfg(feature = "websocket")]
-        if let Some(ws_config) = &self.config.ws {
-            for (_, config) in ws_config.clone() {
-                let server_thread = thread::Builder::new().name(config.name.clone());
-                //TODO: Add support for V5 procotol with websockets. Registered in config or on ServerSettings
-                let mut server = Server::new(config, self.router_tx.clone(), V4);
-                server_thread.spawn(move || {
-                    let mut runtime = tokio::runtime::Builder::new_current_thread();
-                    let runtime = runtime.enable_all().build().unwrap();
-
-                    runtime.block_on(async {
-                        if let Err(e) = server.start(LinkType::Websocket).await {
-                            error!(error=?e, "Server error - WS");
-                        }
-                    });
-                })?;
-            }
         }
 
         if let Some(prometheus_setting) = &self.config.prometheus {
@@ -288,36 +254,23 @@ impl Broker {
     }
 }
 
-#[derive(Copy, Clone)]
-pub enum LinkType {
-    #[cfg(feature = "websocket")]
-    Websocket,
-    Remote,
-}
-
 #[derive(PartialEq)]
 enum AwaitingWill {
     Cancel,
     Fire,
 }
 
-struct Server<P> {
+struct Server {
     config: ServerSettings,
     router_tx: Sender<(ConnectionId, Event)>,
-    protocol: P,
     awaiting_will_handler: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 }
 
-impl<P: Protocol + Clone + Send + 'static> Server<P> {
-    pub fn new(
-        config: ServerSettings,
-        router_tx: Sender<(ConnectionId, Event)>,
-        protocol: P,
-    ) -> Server<P> {
+impl Server {
+    pub fn new(config: ServerSettings, router_tx: Sender<(ConnectionId, Event)>) -> Server {
         Server {
             config,
             router_tx,
-            protocol,
             awaiting_will_handler: Arc::new(Mutex::new(HashMap::default())),
         }
     }
@@ -336,7 +289,7 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
         Ok((Box::new(stream), None))
     }
 
-    async fn start(&mut self, link_type: LinkType) -> Result<(), Error> {
+    async fn start(&mut self) -> Result<(), Error> {
         let listener = TcpListener::bind(&self.config.listen).await?;
         let delay = Duration::from_millis(self.config.next_connection_delay_ms);
         let mut count: usize = 0;
@@ -373,8 +326,12 @@ impl<P: Protocol + Clone + Send + 'static> Server<P> {
             let router_tx = self.router_tx.clone();
             count += 1;
 
-            let protocol = self.protocol.clone();
-            match link_type {
+            let protocol = self.config.protocol;
+            match self.config.link_type {
+                #[cfg(not(feature = "websocket"))]
+                LinkType::Websocket => {
+                    return Err(Error::WebsocketsNotSupported);
+                }
                 #[cfg(feature = "websocket")]
                 LinkType::Websocket => {
                     let stream = match accept_hdr_async(network, WSCallback).await {
@@ -446,12 +403,12 @@ impl Callback for WSCallback {
 /// waiting for mqtt connect packet. Also this honours connection wait time as per config to prevent
 /// denial of service attacks (rogue clients which only establish network connections without
 /// sending a mqtt connection packet to make the server reach its concurrent connection limit).
-async fn remote<P: Protocol>(
+async fn remote(
     config: Arc<ConnectionSettings>,
     tenant_id: Option<String>,
     router_tx: Sender<(ConnectionId, Event)>,
     stream: Box<dyn N>,
-    protocol: P,
+    protocol: Protocol,
     will_handlers: Arc<Mutex<HashMap<String, Sender<AwaitingWill>>>>,
 ) {
     let mut network = Network::new(

@@ -22,7 +22,7 @@ pub enum Error {
 /// Network transforms packets <-> frames efficiently. It takes
 /// advantage of pre-allocation, buffering and vectorization when
 /// appropriate to achieve performance
-pub struct Network<P> {
+pub struct Network {
     /// Socket for IO
     socket: Box<dyn N>,
     /// Buffered reads
@@ -35,17 +35,17 @@ pub struct Network<P> {
     max_connection_buffer_len: usize,
     /// Keep alive timeout
     keepalive: Duration,
-    /// Protocol
-    protocol: P,
+    /// protocol
+    protocol: Protocol,
 }
 
-impl<P: Protocol> Network<P> {
+impl Network {
     pub fn new(
         socket: Box<dyn N>,
         max_incoming_size: usize,
         max_connection_buffer_len: usize,
-        protocol: P,
-    ) -> Network<P> {
+        protocol: Protocol,
+    ) -> Network {
         Network {
             socket,
             read: BytesMut::with_capacity(10 * 1024),
@@ -88,11 +88,10 @@ impl<P: Protocol> Network<P> {
     /// Waits on network for 1 packet
     pub async fn read(&mut self) -> Result<Packet, Error> {
         loop {
-            let required = match Protocol::read_mut(
-                &mut self.protocol,
-                &mut self.read,
-                self.max_incoming_size,
-            ) {
+            let required = match self
+                .protocol
+                .read_mut(&mut self.read, self.max_incoming_size)
+            {
                 Ok(packet) => return Ok(packet),
                 Err(protocol::Error::InsufficientBytes(required)) => required,
                 Err(e) => return Err(e.into()),

@@ -28,7 +28,7 @@ use tracing::*;
 use crate::{
     link::{local::LinkError, network::Network},
     local::LinkBuilder,
-    protocol::{self, Connect, Packet, PingReq, Protocol, QoS, RetainForwardRule, Subscribe},
+    protocol::{self, Connect, Packet, PingReq, QoS, RetainForwardRule, Subscribe},
     router::Event,
     BridgeConfig, ConnectionId, Notification, Transport,
 };
@@ -40,14 +40,10 @@ use super::network::N;
 #[cfg(feature = "use-rustls")]
 use crate::ClientAuth;
 
-pub async fn start<P>(
+pub async fn start(
     config: BridgeConfig,
     router_tx: Sender<(ConnectionId, Event)>,
-    protocol: P,
-) -> Result<(), BridgeError>
-where
-    P: Protocol + Clone + Send + 'static,
-{
+) -> Result<(), BridgeError> {
     let span = tracing::info_span!("bridge_link");
     let _guard = span.enter();
 
@@ -62,7 +58,7 @@ where
         .build()?;
 
     'outer: loop {
-        let mut network = match network_connect(&config, &config.addr, protocol.clone()).await {
+        let mut network = match network_connect(&config, &config.addr).await {
             Ok(v) => v,
             Err(e) => {
                 error!(error=?e, "Error, retrying");
@@ -155,11 +151,7 @@ where
     }
 }
 
-async fn network_connect<P: Protocol>(
-    config: &BridgeConfig,
-    addr: &str,
-    protocol: P,
-) -> Result<Network<P>, BridgeError> {
+async fn network_connect(config: &BridgeConfig, addr: &str) -> Result<Network, BridgeError> {
     match &config.transport {
         Transport::Tcp => {
             let socket = TcpStream::connect(addr).await?;
@@ -167,7 +159,7 @@ async fn network_connect<P: Protocol>(
                 Box::new(socket),
                 config.connections.max_payload_size,
                 config.connections.max_inflight_count,
-                protocol,
+                config.protocol,
             ))
         }
         #[cfg(feature = "use-rustls")]
@@ -180,7 +172,7 @@ async fn network_connect<P: Protocol>(
                 Box::new(socket),
                 config.connections.max_payload_size,
                 config.connections.max_inflight_count,
-                protocol,
+                config.protocol,
             ))
         }
         #[cfg(not(feature = "use-rustls"))]
@@ -257,10 +249,7 @@ pub async fn tls_connect<P: AsRef<Path>>(
     Ok(Box::new(connector.connect(domain, tcp).await?))
 }
 
-async fn network_init<P: Protocol>(
-    config: &BridgeConfig,
-    network: &mut Network<P>,
-) -> Result<(), BridgeError> {
+async fn network_init(config: &BridgeConfig, network: &mut Network) -> Result<(), BridgeError> {
     let connect = Connect {
         keep_alive: 10,
         client_id: config.name.clone(),
@@ -297,8 +286,8 @@ async fn network_init<P: Protocol>(
     .await
 }
 
-async fn send_and_recv<F: FnOnce(Packet) -> bool, P: Protocol>(
-    network: &mut Network<P>,
+async fn send_and_recv<F: FnOnce(Packet) -> bool>(
+    network: &mut Network,
     send_packet: Packet,
     accept_recv: F,
 ) -> Result<(), BridgeError> {

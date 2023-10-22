@@ -10,8 +10,11 @@ use std::{io, str::Utf8Error, string::FromUtf8Error};
 /// MQTT is the core protocol that this broker supports, a lot of structs closely
 /// map to what MQTT specifies in its protocol
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use serde::{Deserialize, Serialize};
 
 use crate::Notification;
+
+use self::{v4::V4, v5::V5};
 
 // TODO: Handle the cases when there are no properties using Inner struct, so
 // handling of properties can be made simplier internally
@@ -746,7 +749,25 @@ pub enum Error {
     InsufficientBytes(usize),
 }
 
-pub trait Protocol {
-    fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error>;
-    fn write(&self, packet: Packet, write: &mut BytesMut) -> Result<usize, Error>;
+#[derive(Debug, Serialize, Deserialize, Default, Copy, Clone)]
+pub enum Protocol {
+    #[default]
+    V4,
+    V5,
+}
+
+impl Protocol {
+    pub fn read_mut(&self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
+        match self {
+            Protocol::V4 => V4::read_mut(stream, max_size),
+            Protocol::V5 => V5::read_mut(stream, max_size),
+        }
+    }
+
+    pub fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+        match self {
+            Protocol::V4 => V4::write(packet, buffer),
+            Protocol::V5 => V5::write(packet, buffer),
+        }
+    }
 }

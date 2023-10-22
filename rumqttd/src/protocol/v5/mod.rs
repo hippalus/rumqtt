@@ -357,9 +357,9 @@ fn read_u32(stream: &mut Bytes) -> Result<u32, Error> {
 #[derive(Debug, Clone)]
 pub struct V5;
 
-impl Protocol for V5 {
+impl V5 {
     /// Reads a stream of bytes and extracts next MQTT packet out of it
-    fn read_mut(&mut self, stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
+    pub fn read_mut(stream: &mut BytesMut, max_size: usize) -> Result<Packet, Error> {
         let fixed_header = check(stream.iter(), max_size)?;
 
         // Test with a stream with exactly the size to check border panics
@@ -432,7 +432,7 @@ impl Protocol for V5 {
         Ok(packet)
     }
 
-    fn write(&self, packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
+    pub fn write(packet: Packet, buffer: &mut BytesMut) -> Result<usize, Error> {
         let size = match packet {
             Packet::Connect(
                 connect,

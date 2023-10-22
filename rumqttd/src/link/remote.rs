@@ -2,7 +2,7 @@ use crate::link::local::{LinkError, LinkRx, LinkTx};
 use crate::link::network;
 use crate::link::network::Network;
 use crate::local::LinkBuilder;
-use crate::protocol::{Connect, Packet, Protocol};
+use crate::protocol::{Connect, Packet};
 use crate::router::{Event, Notification};
 use crate::{ConnectionId, ConnectionSettings};
 
@@ -49,24 +49,24 @@ pub enum Error {
 }
 
 /// Orchestrates between Router and Network.
-pub struct RemoteLink<P> {
+pub struct RemoteLink {
     connect: Connect,
     pub(crate) connection_id: ConnectionId,
-    network: Network<P>,
+    network: Network,
     link_tx: LinkTx,
     link_rx: LinkRx,
     notifications: VecDeque<Notification>,
     pub(crate) will_delay_interval: u32,
 }
 
-impl<P: Protocol> RemoteLink<P> {
+impl RemoteLink {
     pub async fn new(
         router_tx: Sender<(ConnectionId, Event)>,
         tenant_id: Option<String>,
-        mut network: Network<P>,
+        mut network: Network,
         connect_packet: Packet,
         dynamic_filters: bool,
-    ) -> Result<RemoteLink<P>, Error> {
+    ) -> Result<RemoteLink, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
             return Err(Error::NotConnectPacket(connect_packet));
         };
@@ -164,13 +164,10 @@ impl<P: Protocol> RemoteLink<P> {
 
 /// Read MQTT connect packet from network and verify it.
 /// authentication and checks are done here.
-pub async fn mqtt_connect<P>(
+pub async fn mqtt_connect(
     config: Arc<ConnectionSettings>,
-    network: &mut Network<P>,
-) -> Result<Packet, Error>
-where
-    P: Protocol,
-{
+    network: &mut Network,
+) -> Result<Packet, Error> {
     // Wait for MQTT connect packet and error out if it's not received in time to prevent
     // DOS attacks by filling total connections that the server can handle with idle open
     // connections which results in server rejecting new connections
