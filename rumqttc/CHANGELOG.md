@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Expose `EventLoop::clean` to allow triggering shutdown and subsequent storage of pending requests
+- Expose `EventLoop::close` to close the eventloop and return pending(unacked and in channel) requests
 
 ### Changed
 

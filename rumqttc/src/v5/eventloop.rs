@@ -120,10 +120,25 @@ impl EventLoop {
     /// underlying network connection and clears the keepalive timeout if any.
     ///
     /// NOTE: Use only when EventLoop is blocked on network and unable to immediately handle disconnect
-    pub fn clean(&mut self) {
+    fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
         self.pending = self.state.clean().into_iter();
+    }
+
+    /// Close all clients and get back a list of Requests that are inflight or yet to be processed.
+    ///
+    /// NOTE: To be used only when terminating the EventLoop,
+    pub async fn close(mut self) -> Vec<Request> {
+        self.requests_rx.close();
+        self.clean();
+
+        let mut pending: Vec<Request> = self.pending.collect();
+        while let Some(request) = self.requests_rx.recv().await {
+            pending.push(request);
+        }
+
+        pending
     }
 
     /// Yields Next notification or outgoing request and periodically pings
