@@ -136,7 +136,7 @@ impl EventLoop {
     pub fn close(mut self) -> Vec<Request> {
         self.requests_rx.close();
 
-        let mut pending: Vec<Request> = self.state.clean();
+        let mut pending = self.state.clean();
         while let Ok(request) = self.requests_rx.try_recv() {
             pending.push(request);
         }
