@@ -133,12 +133,11 @@ impl EventLoop {
     /// Close all clients and get back a list of Requests that are inflight or yet to be processed.
     ///
     /// NOTE: To be used only when terminating the EventLoop,
-    pub async fn close(mut self) -> Vec<Request> {
+    pub fn close(mut self) -> Vec<Request> {
         self.requests_rx.close();
-        self.clean();
 
-        let mut pending: Vec<Request> = self.pending.collect();
-        while let Some(request) = self.requests_rx.recv().await {
+        let mut pending: Vec<Request> = self.state.clean();
+        while let Ok(request) = self.requests_rx.try_recv() {
             pending.push(request);
         }
 
