@@ -127,7 +127,12 @@ impl EventLoop {
     pub fn clean(&mut self) {
         self.network = None;
         self.keepalive_timeout = None;
-        self.pending = self.state.clean().into_iter();
+        let mut pending = self.state.clean();
+        // Pull all requests from channel between `AsyncClient` and `EventLoop`
+        // NOTE: ensure all tx are closed, else data sent onto channel after drain will be lost.
+        let in_channel = self.requests_rx.drain().collect::<Vec<Request>>();
+        pending.extend_from_slice(&in_channel);
+        self.pending = pending.into_iter();
     }
 
     /// Yields Next notification or outgoing request and periodically pings
