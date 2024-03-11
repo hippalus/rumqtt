@@ -32,22 +32,12 @@ pub fn valid_filter(filter: &str) -> bool {
     }
 
     // remaining entries
-    for entry in hirerarchy {
-        // # is not allowed in filter except as a last entry
-        // invalid: sport/tennis#/player
-        // invalid: sport/tennis/#/ranking
-        if entry.contains('#') {
-            return false;
-        }
-
-        // + must occupy an entire level of the filter
-        // invalid: sport+
-        if entry.len() > 1 && entry.contains('+') {
-            return false;
-        }
-    }
-
-    true
+    // # is not allowed in filter except as a last entry
+    // invalid: sport/tennis#/player
+    // invalid: sport/tennis/#/ranking
+    // + must occupy an entire level of the filter
+    // invalid: sport+
+    hirerarchy.any(|entry| !(entry.contains('#') && entry.len() > 1 && entry.contains('+')))
 }
 
 /// Checks if topic matches a filter. topic and filter validation isn't done here.
