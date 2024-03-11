@@ -3,14 +3,9 @@ pub fn has_wildcards(s: &str) -> bool {
     s.contains('+') || s.contains('#')
 }
 
-/// Checks if a topic is valid
+/// Checks if a topic is valid, it can't have wildcards
 pub fn valid_topic(topic: &str) -> bool {
-    // topic can't contain wildcards
-    if topic.contains('+') || topic.contains('#') {
-        return false;
-    }
-
-    true
+    !has_wildcards(topic)
 }
 
 /// Checks if the filter is valid
@@ -32,7 +27,7 @@ pub fn valid_filter(filter: &str) -> bool {
     // only single '#" or '+' is allowed in last entry
     // invalid: sport/tennis#
     // invalid: sport/++
-    if last.len() != 1 && (last.contains('#') || last.contains('+')) {
+    if last.len() != 1 && has_wildcards(filter) {
         return false;
     }
 
