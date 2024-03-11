@@ -199,8 +199,8 @@ impl MqttState {
                 self.check_size(unsubscribe.size())?;
                 self.outgoing_unsubscribe(unsubscribe)?
             }
-            Request::PingReq => self.outgoing_ping()?,
-            Request::Disconnect => {
+            Request::PingReq(_) => self.outgoing_ping()?,
+            Request::Disconnect(_) => {
                 self.outgoing_disconnect(DisconnectReasonCode::NormalDisconnection)?
             }
             Request::PubAck(puback) => {

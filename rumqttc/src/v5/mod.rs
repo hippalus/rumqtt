@@ -30,24 +30,7 @@ pub use crate::tls::Error as TlsError;
 pub use crate::proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
-
-/// Requests by the client to mqtt event loop. Request are
-/// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq,
-    PingResp,
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect,
-}
+pub type Request = Packet;
 
 #[cfg(feature = "websocket")]
 type RequestModifierFn = Arc<

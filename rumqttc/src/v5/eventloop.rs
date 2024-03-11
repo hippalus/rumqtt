@@ -229,7 +229,7 @@ impl EventLoop {
                 let timeout = self.keepalive_timeout.as_mut().unwrap();
                 timeout.as_mut().reset(Instant::now() + self.options.keep_alive);
 
-                self.state.handle_outgoing_packet(Request::PingReq)?;
+                self.state.handle_outgoing_packet(Request::PingReq(PingReq))?;
                 network.flush(&mut self.state.write).await?;
                 Ok(self.state.events.pop_front().unwrap())
             }

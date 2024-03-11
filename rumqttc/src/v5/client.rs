@@ -7,7 +7,9 @@ use super::mqttbytes::v5::{
     Unsubscribe, UnsubscribeProperties,
 };
 use super::mqttbytes::QoS;
-use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use super::{
+    ConnectionError, Disconnect, DisconnectReasonCode, Event, EventLoop, MqttOptions, Request,
+};
 use crate::valid_topic;
 
 use bytes::Bytes;
@@ -418,15 +420,25 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
-        self.request_tx.send_async(request).await?;
+        let disconnect = Disconnect {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            properties: None,
+        };
+        self.request_tx
+            .send_async(Request::Disconnect(disconnect))
+            .await?;
+
         Ok(())
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
-        self.request_tx.try_send(request)?;
+        let disconnect = Disconnect {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            properties: None,
+        };
+        self.request_tx.try_send(Request::Disconnect(disconnect))?;
+
         Ok(())
     }
 }
@@ -715,8 +727,14 @@ impl Client {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect;
-        self.client.request_tx.send(request)?;
+        let disconnect = Disconnect {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            properties: None,
+        };
+        self.client
+            .request_tx
+            .send(Request::Disconnect(disconnect))?;
+
         Ok(())
     }
 
