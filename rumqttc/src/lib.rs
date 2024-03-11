@@ -154,6 +154,7 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 pub use proxy::{Proxy, ProxyAuth, ProxyType};
 
 pub type Incoming = Packet;
+pub type Request = Packet;
 
 /// Current outgoing activity on the eventloop
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,49 +181,6 @@ pub enum Outgoing {
     Disconnect,
     /// Await for an ack for more outgoing progress
     AwaitAck(u16),
-}
-
-/// Requests by the client to mqtt event loop. Request are
-/// handled one by one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request {
-    Publish(Publish),
-    PubAck(PubAck),
-    PubRec(PubRec),
-    PubComp(PubComp),
-    PubRel(PubRel),
-    PingReq(PingReq),
-    PingResp(PingResp),
-    Subscribe(Subscribe),
-    SubAck(SubAck),
-    Unsubscribe(Unsubscribe),
-    UnsubAck(UnsubAck),
-    Disconnect(Disconnect),
-}
-
-impl Request {
-    fn size(&self) -> usize {
-        match &self {
-            Request::Publish(publish) => publish.size(),
-            Request::PubAck(puback) => puback.size(),
-            Request::PubRec(pubrec) => pubrec.size(),
-            Request::PubComp(pubcomp) => pubcomp.size(),
-            Request::PubRel(pubrel) => pubrel.size(),
-            Request::PingReq(pingreq) => pingreq.size(),
-            Request::PingResp(pingresp) => pingresp.size(),
-            Request::Subscribe(subscribe) => subscribe.size(),
-            Request::SubAck(suback) => suback.size(),
-            Request::Unsubscribe(unsubscribe) => unsubscribe.size(),
-            Request::UnsubAck(unsuback) => unsuback.size(),
-            Request::Disconnect(disconn) => disconn.size(),
-        }
-    }
-}
-
-impl From<Publish> for Request {
-    fn from(publish: Publish) -> Request {
-        Request::Publish(publish)
-    }
 }
 
 impl From<Subscribe> for Request {
