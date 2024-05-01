@@ -24,6 +24,7 @@ pub use link::meters;
 pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
 use segments::Storage;
 pub use server::Broker;
+pub use server::Error;
 
 pub use self::router::shared_subs::Strategy;
 
