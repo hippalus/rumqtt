@@ -129,6 +129,18 @@ impl ServerSettings {
     }
 }
 
+impl Default for ServerSettings {
+    fn default() -> Self {
+        ServerSettings {
+            name: "broker".to_string(),
+            listen: "0.0.0.0:1883".parse().expect("This should be valid"),
+            tls: None,
+            next_connection_delay_ms: 1,
+            connections: ConnectionSettings::default(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BridgeConfig {
     pub name: String,
@@ -178,6 +190,19 @@ impl fmt::Debug for ConnectionSettings {
             .field("external_auth", &self.external_auth.is_some())
             .field("dynamic_filters", &self.dynamic_filters)
             .finish()
+    }
+}
+
+impl Default for ConnectionSettings {
+    fn default() -> Self {
+        ConnectionSettings {
+            connection_timeout_ms: 60000,
+            max_payload_size: 20480,
+            max_inflight_count: 100,
+            dynamic_filters: true,
+            auth: None,
+            external_auth: None,
+        }
     }
 }
 
