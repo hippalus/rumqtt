@@ -144,7 +144,7 @@ impl EventLoop {
                 Duration::from_secs(self.network_options.connection_timeout()),
                 connect(&self.mqtt_options, self.network_options.clone()),
             )
-            .await
+                .await
             {
                 Ok(inner) => inner?,
                 Err(_) => return Err(ConnectionError::NetworkTimeout),
@@ -171,7 +171,7 @@ impl EventLoop {
     async fn select(&mut self) -> Result<Event, ConnectionError> {
         let network = self.network.as_mut().unwrap();
         // let await_acks = self.state.await_acks;
-        let inflight_full = self.state.inflight >= self.mqtt_options.inflight;
+        let inflight_full = self.state.inflight() >= self.mqtt_options.inflight() as usize;
         let collision = self.state.collision.is_some();
         let network_timeout = Duration::from_secs(self.network_options.connection_timeout());
 
@@ -452,7 +452,7 @@ async fn network_connect(
                 tcp_stream,
                 Some(connector),
             )
-            .await?;
+                .await?;
             validate_response_headers(response)?;
 
             Network::new(
