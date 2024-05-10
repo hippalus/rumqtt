@@ -512,12 +512,13 @@ impl MqttState {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod test {
     use super::{MqttState, StateError};
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
+    use crate::ds::OutgoingPublishBucketList;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -569,7 +570,7 @@ mod test {
         // QoS 0 publish shouldn't be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 0);
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::AtLeastOnce);
@@ -577,12 +578,12 @@ mod test {
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 1);
-        assert_eq!(mqtt.inflight, 1);
+        assert_eq!(mqtt.inflight(), 1);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 2);
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         // QoS1 Publish
         let publish = build_outgoing_publish(QoS::ExactlyOnce);
@@ -590,12 +591,12 @@ mod test {
         // Packet id should be set and publish should be saved in queue
         mqtt.outgoing_publish(publish.clone()).unwrap();
         assert_eq!(mqtt.last_pkid, 3);
-        assert_eq!(mqtt.inflight, 3);
+        assert_eq!(mqtt.inflight(), 3);
 
         // Packet id should be incremented and publish should be saved in queue
         mqtt.outgoing_publish(publish).unwrap();
         assert_eq!(mqtt.last_pkid, 4);
-        assert_eq!(mqtt.inflight, 4);
+        assert_eq!(mqtt.inflight(), 4);
     }
 
     #[test]
@@ -611,10 +612,10 @@ mod test {
         mqtt.handle_incoming_publish(&publish2).unwrap();
         mqtt.handle_incoming_publish(&publish3).unwrap();
 
-        let pkid = mqtt.incoming_pub[3].unwrap();
+        let pkid = mqtt.incoming_pub.contains(3);
 
         // only qos2 publish should be add to queue
-        assert_eq!(pkid, 3);
+        assert!(pkid);
     }
 
     #[test]
@@ -657,9 +658,9 @@ mod test {
         mqtt.handle_incoming_publish(&publish2).unwrap();
         mqtt.handle_incoming_publish(&publish3).unwrap();
 
-        let pkid = mqtt.incoming_pub[3].unwrap();
-        assert_eq!(pkid, 3);
+        let pkid = mqtt.incoming_pub.contains(3);
 
+        assert!(pkid);
         assert!(mqtt.events.is_empty());
     }
 
@@ -684,16 +685,16 @@ mod test {
 
         mqtt.outgoing_publish(publish1).unwrap();
         mqtt.outgoing_publish(publish2).unwrap();
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         mqtt.handle_incoming_puback(&PubAck::new(1)).unwrap();
-        assert_eq!(mqtt.inflight, 1);
+        assert_eq!(mqtt.inflight(), 1);
 
         mqtt.handle_incoming_puback(&PubAck::new(2)).unwrap();
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
 
-        assert!(mqtt.outgoing_pub[1].is_none());
-        assert!(mqtt.outgoing_pub[2].is_none());
+        assert!(mqtt.outgoing_pub.get(1).unwrap().is_none());
+        assert!(mqtt.outgoing_pub.get(2).unwrap().is_none());
     }
 
     #[test]
@@ -703,7 +704,7 @@ mod test {
         let got = mqtt.handle_incoming_puback(&PubAck::new(101)).unwrap_err();
 
         match got {
-            StateError::Unsolicited(pkid) => assert_eq!(pkid, 101),
+            StateError::PacketIdOutOfBounds(pkid) => assert_eq!(pkid, 101),
             e => panic!("Unexpected error: {}", e),
         }
     }
@@ -719,14 +720,14 @@ mod test {
         let _publish_out = mqtt.outgoing_publish(publish2);
 
         mqtt.handle_incoming_pubrec(&PubRec::new(2)).unwrap();
-        assert_eq!(mqtt.inflight, 2);
+        assert_eq!(mqtt.inflight(), 2);
 
         // check if the remaining element's pkid is 1
-        let backup = mqtt.outgoing_pub[1].clone();
+        let backup = mqtt.outgoing_pub.get(1).unwrap();
         assert_eq!(backup.unwrap().pkid, 1);
 
         // check if the qos2 element's release pkid is 2
-        assert_eq!(mqtt.outgoing_rel[2].unwrap(), 2);
+        assert!(mqtt.outgoing_rel.contains(2));
     }
 
     #[test]
@@ -780,7 +781,7 @@ mod test {
         mqtt.handle_incoming_pubrec(&PubRec::new(1)).unwrap();
 
         mqtt.handle_incoming_pubcomp(&PubComp::new(1)).unwrap();
-        assert_eq!(mqtt.inflight, 0);
+        assert_eq!(mqtt.inflight(), 0);
     }
 
     #[test]
@@ -818,50 +819,58 @@ mod test {
     #[test]
     fn clean_is_calculating_pending_correctly() {
         let mut mqtt = build_mqttstate();
+        let outgoing_publishes = vec![
+            None,
+            Some(Publish {
+                dup: false,
+                qos: QoS::AtMostOnce,
+                retain: false,
+                topic: "test".to_string(),
+                pkid: 1,
+                payload: "".into(),
+            }),
+            Some(Publish {
+                dup: false,
+                qos: QoS::AtMostOnce,
+                retain: false,
+                topic: "test".to_string(),
+                pkid: 2,
+                payload: "".into(),
+            }),
+            Some(Publish {
+                dup: false,
+                qos: QoS::AtMostOnce,
+                retain: false,
+                topic: "test".to_string(),
+                pkid: 3,
+                payload: "".into(),
+            }),
+            None,
+            None,
+            Some(Publish {
+                dup: false,
+                qos: QoS::AtMostOnce,
+                retain: false,
+                topic: "test".to_string(),
+                pkid: 6,
+                payload: "".into(),
+            }),
+        ];
+        let build_outgoing_pub = || -> OutgoingPublishBucketList {
+            let mut bucket = OutgoingPublishBucketList::with_limit(outgoing_publishes.len() as u16);
 
-        fn build_outgoing_pub() -> Vec<Option<Publish>> {
-            vec![
-                None,
-                Some(Publish {
-                    dup: false,
-                    qos: QoS::AtMostOnce,
-                    retain: false,
-                    topic: "test".to_string(),
-                    pkid: 1,
-                    payload: "".into(),
-                }),
-                Some(Publish {
-                    dup: false,
-                    qos: QoS::AtMostOnce,
-                    retain: false,
-                    topic: "test".to_string(),
-                    pkid: 2,
-                    payload: "".into(),
-                }),
-                Some(Publish {
-                    dup: false,
-                    qos: QoS::AtMostOnce,
-                    retain: false,
-                    topic: "test".to_string(),
-                    pkid: 3,
-                    payload: "".into(),
-                }),
-                None,
-                None,
-                Some(Publish {
-                    dup: false,
-                    qos: QoS::AtMostOnce,
-                    retain: false,
-                    topic: "test".to_string(),
-                    pkid: 6,
-                    payload: "".into(),
-                }),
-            ]
-        }
+            outgoing_publishes.iter().enumerate().for_each(|(idx, publish)| {
+                if let Some(publish) = publish {
+                    let _ = bucket.insert(publish.clone());
+                }
+            });
+            bucket
+        };
 
         mqtt.outgoing_pub = build_outgoing_pub();
         mqtt.last_puback = 3;
         let requests = mqtt.clean();
+        info!("{:?}", requests);
         let res = vec![6, 1, 2, 3];
         for (req, idx) in requests.iter().zip(res) {
             if let Request::Publish(publish) = req {
@@ -895,4 +904,32 @@ mod test {
             }
         }
     }
-}*/
+
+    #[test]
+    fn incoming_puback_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight,false);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubrec_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight,false);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubRec(PubRec::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubrel_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight,false);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubRel(PubRel::new(max_inflight + 1)));
+    }
+
+    #[test]
+    fn incoming_pubcomp_with_pkid_exceeding_max_inflight_should_not_panic() {
+        let max_inflight = 100;
+        let mut mqtt = MqttState::new(max_inflight,false);
+        let _ = mqtt.handle_incoming_packet(Incoming::PubComp(PubComp::new(max_inflight + 1)));
+    }
+}
