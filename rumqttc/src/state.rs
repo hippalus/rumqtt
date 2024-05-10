@@ -2,7 +2,7 @@ use std::{io, time::Instant};
 use std::collections::VecDeque;
 
 use crate::{Event, Incoming, Outgoing, Request};
-use crate::ds::{OutgoingPublishBucketList, OutOfBounds, PkidSet};
+use crate::ds::{OutgoingPublishBucket, OutOfBounds, PkidSet};
 use crate::mqttbytes::{self, *};
 use crate::mqttbytes::v4::*;
 
@@ -68,7 +68,7 @@ pub struct MqttState {
     /// Maximum number of allowed inflight
     pub(crate) max_inflight: u16,
     /// Outgoing QoS 1, 2 publishes which aren't acked yet
-    pub(crate) outgoing_pub: OutgoingPublishBucketList,
+    pub(crate) outgoing_pub: OutgoingPublishBucket,
     /// Packet ids of released QoS 2 publishes
     pub(crate) outgoing_rel: PkidSet,
     /// Packet ids on incoming QoS 2 publishes
@@ -94,7 +94,7 @@ impl MqttState {
             last_pkid: 0,
             last_puback: 0,
             max_inflight,
-            outgoing_pub: OutgoingPublishBucketList::with_limit(max_inflight),
+            outgoing_pub: OutgoingPublishBucket::with_limit(max_inflight),
             outgoing_rel: PkidSet::with_limit(max_inflight),
             incoming_pub: PkidSet::full_range(),
             collision: None,
@@ -518,7 +518,7 @@ mod test {
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
-    use crate::ds::OutgoingPublishBucketList;
+    use crate::ds::OutgoingPublishBucket;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -856,8 +856,8 @@ mod test {
                 payload: "".into(),
             }),
         ];
-        let build_outgoing_pub = || -> OutgoingPublishBucketList {
-            let mut bucket = OutgoingPublishBucketList::with_limit(outgoing_publishes.len() as u16);
+        let build_outgoing_pub = || -> OutgoingPublishBucket {
+            let mut bucket = OutgoingPublishBucket::with_limit(outgoing_publishes.len() as u16);
 
             outgoing_publishes.iter().enumerate().for_each(|(idx, publish)| {
                 if let Some(publish) = publish {
@@ -870,7 +870,7 @@ mod test {
         mqtt.outgoing_pub = build_outgoing_pub();
         mqtt.last_puback = 3;
         let requests = mqtt.clean();
-        info!("{:?}", requests);
+        print!("{:?}", requests);
         let res = vec![6, 1, 2, 3];
         for (req, idx) in requests.iter().zip(res) {
             if let Request::Publish(publish) = req {

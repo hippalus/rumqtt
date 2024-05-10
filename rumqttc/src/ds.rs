@@ -1,14 +1,14 @@
 use crate::Publish;
 
 #[derive(Debug, Clone)]
-pub struct OutgoingPublishBucketList {
+pub struct OutgoingPublishBucket {
     vec: Vec<Option<Publish>>,
     len: usize,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct OutOfBounds(pub u16);
-impl OutgoingPublishBucketList {
+impl OutgoingPublishBucket {
     pub fn with_limit(max_pkid: u16) -> Self {
         Self {
             vec: vec![None; max_pkid as usize + 1],
@@ -20,6 +20,7 @@ impl OutgoingPublishBucketList {
     pub fn len(&self) -> usize {
         self.len
     }
+
     /// Removes all items from the list and inserts the `Some` items into `vec` after mapping with
     /// `map`.
     pub fn drain_into<T>(&mut self, vec: &mut Vec<T>, map: impl Fn(Publish) -> T) {
@@ -30,6 +31,7 @@ impl OutgoingPublishBucketList {
         }
         self.len = 0;
     }
+
     /// Inserts `value` into the bucket list returning the previous value, unless the `pkid` is out
     /// of bounds.
     ///
