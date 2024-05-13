@@ -8,6 +8,7 @@ pub struct OutgoingPublishBucket {
 
 #[derive(Debug, Copy, Clone)]
 pub struct OutOfBounds(pub u16);
+
 impl OutgoingPublishBucket {
     pub fn with_limit(max_pkid: u16) -> Self {
         Self {
@@ -16,20 +17,31 @@ impl OutgoingPublishBucket {
         }
     }
 
-    /// Returns the number of `Some(Publish)` items in the bucket list.
-    pub fn len(&self) -> usize {
-        self.len
-    }
+    pub fn drain_into<T>(&mut self, vec: &mut Vec<T>, last_puback: usize, map: fn(Publish) -> T) {
+        let (first_half, second_half) = self.split_at_mut(last_puback);
 
-    /// Removes all items from the list and inserts the `Some` items into `vec` after mapping with
-    /// `map`.
-    pub fn drain_into<T>(&mut self, vec: &mut Vec<T>, map: impl Fn(Publish) -> T) {
-        for opt in self.vec.iter_mut() {
+        second_half.iter_mut().chain(first_half).for_each(|opt| {
             if let Some(v) = opt.take() {
                 vec.push(map(v));
             }
-        }
+        });
+
+        self.clear();
+    }
+
+    fn split_at_mut(&mut self, mid: usize) -> (&mut [Option<Publish>], &mut [Option<Publish>]) {
+        self.vec.split_at_mut(mid)
+    }
+
+    /// Empties the vec.
+    pub fn clear(&mut self) {
+        self.vec.clear();
         self.len = 0;
+    }
+
+    /// Returns the number of `Some(Publish)` items in the bucket list.
+    pub fn len(&self) -> usize {
+        self.len
     }
 
     /// Inserts `value` into the bucket list returning the previous value, unless the `pkid` is out
@@ -72,6 +84,13 @@ impl OutgoingPublishBucket {
             .get(pkid as usize)
             .ok_or(OutOfBounds(pkid))
             .map(Option::as_ref)
+    }
+}
+
+impl From<Vec<Option<Publish>>> for OutgoingPublishBucket {
+    fn from(vec: Vec<Option<Publish>>) -> Self {
+        let len = vec.iter().filter(|v| v.is_some()).count();
+        Self { vec, len }
     }
 }
 
@@ -119,7 +138,7 @@ impl PkidSet {
         let index = pkid as usize;
         if index < self.set.len() {
             let old = self.set.put(index);
-            if old == false {
+            if !old {
                 self.len += 1;
             }
             Ok(old)

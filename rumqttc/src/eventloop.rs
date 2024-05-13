@@ -144,7 +144,7 @@ impl EventLoop {
                 Duration::from_secs(self.network_options.connection_timeout()),
                 connect(&self.mqtt_options, self.network_options.clone()),
             )
-                .await
+            .await
             {
                 Ok(inner) => inner?,
                 Err(_) => return Err(ConnectionError::NetworkTimeout),
@@ -452,7 +452,7 @@ async fn network_connect(
                 tcp_stream,
                 Some(connector),
             )
-                .await?;
+            .await?;
             validate_response_headers(response)?;
 
             Network::new(

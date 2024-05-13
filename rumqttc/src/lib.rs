@@ -131,9 +131,9 @@ type RequestModifierFn = Arc<
         + Sync,
 >;
 
+mod ds;
 #[cfg(feature = "proxy")]
 mod proxy;
-mod ds;
 
 pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,

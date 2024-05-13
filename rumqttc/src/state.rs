@@ -1,10 +1,10 @@
-use std::{io, time::Instant};
 use std::collections::VecDeque;
+use std::{io, time::Instant};
 
-use crate::{Event, Incoming, Outgoing, Request};
-use crate::ds::{OutgoingPublishBucket, OutOfBounds, PkidSet};
-use crate::mqttbytes::{self, *};
+use crate::ds::{OutOfBounds, OutgoingPublishBucket, PkidSet};
 use crate::mqttbytes::v4::*;
+use crate::mqttbytes::{self, *};
+use crate::{Event, Incoming, Outgoing, Request};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -41,7 +41,6 @@ impl From<OutOfBounds> for StateError {
         StateError::PacketIdOutOfBounds(pkid)
     }
 }
-
 
 /// State of the mqtt connection.
 // Design: Methods will just modify the state of the object without doing any network operations
@@ -109,14 +108,16 @@ impl MqttState {
         let mut pending = Vec::with_capacity(self.inflight());
 
         // remove and collect pending publishes
-        self.outgoing_pub.drain_into(&mut pending, Request::Publish);
+        let last_puback = self.last_puback as usize + 1;
+        self.outgoing_pub
+            .drain_into(&mut pending, last_puback, Request::Publish);
 
         // remove and collect pending releases
-        self.outgoing_rel.drain_into(&mut pending, |pkid| Request::PubRel(PubRel::new(pkid)));
+        self.outgoing_rel
+            .drain_into(&mut pending, |pkid| Request::PubRel(PubRel::new(pkid)));
 
         // remove packed ids of incoming qos2 publishes
         self.incoming_pub.clear();
-
 
         self.await_pingresp = false;
         self.collision_ping_count = 0;
@@ -229,11 +230,8 @@ impl MqttState {
             Packet::Publish(publish)
         });
 
-
         match self.outgoing_pub.remove(puback.pkid)? {
-            Some(_) => {
-                Ok(packet)
-            }
+            Some(_) => Ok(packet),
             None => {
                 error!("Unsolicited puback packet: {:?}", puback.pkid);
                 Err(StateError::Unsolicited(puback.pkid))
@@ -276,30 +274,20 @@ impl MqttState {
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
-        let pkid = pubcomp.pkid;
-
-        if let Some(publish) = self.check_collision(pkid) {
-            debug_assert_eq!(publish.pkid, pkid);
-            let _ = self.outgoing_pub.insert(publish);
-            let packet = self.check_collision(pubcomp.pkid).map(|publish| {
-                let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
-                self.events.push_back(event);
-                self.collision_ping_count = 0;
-
-                Packet::Publish(publish)
-            });
-
-            let had_pkid = self.outgoing_rel.remove(pkid)?;
-            if had_pkid {
-                Ok(packet)
-            } else {
-                error!("Unsolicited pubcomp packet: {:?}", pkid);
-                Err(StateError::Unsolicited(pkid))
-            }
-        } else {
-            error!("Unsolicited pubcomp packet: {:?}", pkid);
-            Err(StateError::Unsolicited(pkid))
+        if !self.outgoing_rel.remove(pubcomp.pkid)? {
+            error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
+            return Err(StateError::Unsolicited(pubcomp.pkid));
         }
+
+        let packet = self.check_collision(pubcomp.pkid).map(|publish| {
+            let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
+            self.events.push_back(event);
+            self.collision_ping_count = 0;
+
+            Packet::Publish(publish)
+        });
+
+        Ok(packet)
     }
 
     fn handle_incoming_pingresp(&mut self) -> Result<Option<Packet>, StateError> {
@@ -331,7 +319,6 @@ impl MqttState {
             // packet yet. This error is possible only when broker isn't acking sequentially
             self.outgoing_pub.insert(publish.clone())?;
         }
-
 
         debug!(
             "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
@@ -514,11 +501,12 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use super::{MqttState, StateError};
+    use crate::ds::OutgoingPublishBucket;
     use crate::mqttbytes::v4::*;
     use crate::mqttbytes::*;
     use crate::{Event, Incoming, Outgoing, Request};
-    use crate::ds::OutgoingPublishBucket;
+
+    use super::{MqttState, StateError};
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();
@@ -819,88 +807,62 @@ mod test {
     #[test]
     fn clean_is_calculating_pending_correctly() {
         let mut mqtt = build_mqttstate();
-        let outgoing_publishes = vec![
-            None,
-            Some(Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain: false,
-                topic: "test".to_string(),
-                pkid: 1,
-                payload: "".into(),
-            }),
-            Some(Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain: false,
-                topic: "test".to_string(),
-                pkid: 2,
-                payload: "".into(),
-            }),
-            Some(Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain: false,
-                topic: "test".to_string(),
-                pkid: 3,
-                payload: "".into(),
-            }),
-            None,
-            None,
-            Some(Publish {
-                dup: false,
-                qos: QoS::AtMostOnce,
-                retain: false,
-                topic: "test".to_string(),
-                pkid: 6,
-                payload: "".into(),
-            }),
+        fn build_outgoing_pub() -> Vec<Option<Publish>> {
+            vec![
+                None,
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 1,
+                    payload: "".into(),
+                }),
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 2,
+                    payload: "".into(),
+                }),
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 3,
+                    payload: "".into(),
+                }),
+                None,
+                None,
+                Some(Publish {
+                    dup: false,
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    topic: "test".to_string(),
+                    pkid: 6,
+                    payload: "".into(),
+                }),
+            ]
+        }
+
+        let test_cases = vec![
+            (3, vec![6, 1, 2, 3]),
+            (0, vec![1, 2, 3, 6]),
+            (6, vec![1, 2, 3, 6]),
         ];
-        let build_outgoing_pub = || -> OutgoingPublishBucket {
-            let mut bucket = OutgoingPublishBucket::with_limit(outgoing_publishes.len() as u16);
 
-            outgoing_publishes.iter().enumerate().for_each(|(idx, publish)| {
-                if let Some(publish) = publish {
-                    let _ = bucket.insert(publish.clone());
+        for (last_puback, expected) in test_cases {
+            mqtt.outgoing_pub = OutgoingPublishBucket::from(build_outgoing_pub());
+            mqtt.last_puback = last_puback;
+            let requests = mqtt.clean();
+            for (req, &idx) in requests.iter().zip(&expected) {
+                if let Request::Publish(publish) = req {
+                    assert_eq!(publish.pkid, idx);
+                } else {
+                    unreachable!()
                 }
-            });
-            bucket
-        };
-
-        mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_puback = 3;
-        let requests = mqtt.clean();
-        print!("{:?}", requests);
-        let res = vec![6, 1, 2, 3];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
-                assert_eq!(publish.pkid, idx);
-            } else {
-                unreachable!()
-            }
-        }
-
-        mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_puback = 0;
-        let requests = mqtt.clean();
-        let res = vec![1, 2, 3, 6];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
-                assert_eq!(publish.pkid, idx);
-            } else {
-                unreachable!()
-            }
-        }
-
-        mqtt.outgoing_pub = build_outgoing_pub();
-        mqtt.last_puback = 6;
-        let requests = mqtt.clean();
-        let res = vec![1, 2, 3, 6];
-        for (req, idx) in requests.iter().zip(res) {
-            if let Request::Publish(publish) = req {
-                assert_eq!(publish.pkid, idx);
-            } else {
-                unreachable!()
             }
         }
     }
@@ -908,28 +870,28 @@ mod test {
     #[test]
     fn incoming_puback_with_pkid_exceeding_max_inflight_should_not_panic() {
         let max_inflight = 100;
-        let mut mqtt = MqttState::new(max_inflight,false);
+        let mut mqtt = MqttState::new(max_inflight, false);
         let _ = mqtt.handle_incoming_packet(Incoming::PubAck(PubAck::new(max_inflight + 1)));
     }
 
     #[test]
     fn incoming_pubrec_with_pkid_exceeding_max_inflight_should_not_panic() {
         let max_inflight = 100;
-        let mut mqtt = MqttState::new(max_inflight,false);
+        let mut mqtt = MqttState::new(max_inflight, false);
         let _ = mqtt.handle_incoming_packet(Incoming::PubRec(PubRec::new(max_inflight + 1)));
     }
 
     #[test]
     fn incoming_pubrel_with_pkid_exceeding_max_inflight_should_not_panic() {
         let max_inflight = 100;
-        let mut mqtt = MqttState::new(max_inflight,false);
+        let mut mqtt = MqttState::new(max_inflight, false);
         let _ = mqtt.handle_incoming_packet(Incoming::PubRel(PubRel::new(max_inflight + 1)));
     }
 
     #[test]
     fn incoming_pubcomp_with_pkid_exceeding_max_inflight_should_not_panic() {
         let max_inflight = 100;
-        let mut mqtt = MqttState::new(max_inflight,false);
+        let mut mqtt = MqttState::new(max_inflight, false);
         let _ = mqtt.handle_incoming_packet(Incoming::PubComp(PubComp::new(max_inflight + 1)));
     }
 }
