@@ -159,6 +159,8 @@ impl MqttState {
         &mut self,
         packet: Incoming,
     ) -> Result<Option<Packet>, StateError> {
+        self.events.push_back(Event::Incoming(packet.clone()));
+
         let outgoing = match &packet {
             Incoming::PingResp => self.handle_incoming_pingresp()?,
             Incoming::Publish(publish) => self.handle_incoming_publish(publish)?,
@@ -173,7 +175,6 @@ impl MqttState {
                 return Err(StateError::WrongPacket);
             }
         };
-        self.events.push_back(Event::Incoming(packet));
         self.last_incoming = Instant::now();
 
         Ok(outgoing)
@@ -207,7 +208,6 @@ impl MqttState {
 
                 if !self.manual_acks {
                     let pubrec = PubRec::new(pkid);
-                    let _ = self.incoming_pub.insert(pkid);
                     return self.outgoing_pubrec(pubrec);
                 }
                 Ok(None)
@@ -299,10 +299,12 @@ impl MqttState {
     /// Adds next packet identifier to QoS 1 and 2 publish packets and returns
     /// it buy wrapping publish in packet
     fn outgoing_publish(&mut self, mut publish: Publish) -> Result<Option<Packet>, StateError> {
-        self.assign_pkid(&mut publish);
-        let pkid = publish.pkid;
-
         if publish.qos != QoS::AtMostOnce {
+            if publish.pkid == 0 {
+                publish.pkid = self.next_pkid();
+            }
+
+            let pkid = publish.pkid;
             // if there is an existing publish at this pkid, this implies that client
             // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
             // after a count of 'inflight' messages. this error is possible only when
@@ -466,19 +468,6 @@ impl MqttState {
         Ok(pubrel)
     }
 
-    fn assign_pkid(&mut self, publish: &mut Publish) {
-        match publish.qos {
-            QoS::AtMostOnce => {
-                publish.pkid = 0;
-            }
-            QoS::AtLeastOnce | QoS::ExactlyOnce => {
-                // consider PacketIdentifier(0) as uninitialized packets
-                if publish.pkid == 0 {
-                    publish.pkid = self.next_pkid();
-                }
-            }
-        }
-    }
     /// http://stackoverflow.com/questions/11115364/mqtt-messageid-practical-implementation
     /// Packet ids are incremented till maximum set inflight messages and reset to 1 after that.
     ///
@@ -807,6 +796,7 @@ mod test {
     #[test]
     fn clean_is_calculating_pending_correctly() {
         let mut mqtt = build_mqttstate();
+
         fn build_outgoing_pub() -> Vec<Option<Publish>> {
             vec![
                 None,
