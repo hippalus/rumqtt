@@ -42,33 +42,29 @@ impl OutgoingPublishBucket {
     /// If the position is out of bounds, it returns an `OutOfBounds` error.
     pub fn remove(&mut self, pkid: u16) -> Result<Option<Publish>, OutOfBounds> {
         let index = pkid as usize;
-        match self.vec.get_mut(index) {
-            Some(slot) => Ok(slot.take()),
-            None => Err(OutOfBounds(pkid)),
-        }
+        self.vec.get_mut(index)
+            .map(|slot| Ok(slot.take()))
+            .unwrap_or_else(|| Err(OutOfBounds(pkid)))
     }
 
     /// Returns a reference to the `Publish` value at the specified position.
     /// If the position is out of bounds, it returns an `OutOfBounds` error.
     pub fn get(&self, pkid: u16) -> Result<Option<&Publish>, OutOfBounds> {
-        self.vec
-            .get(pkid as usize)
-            .ok_or(OutOfBounds(pkid))
-            .map(Option::as_ref)
+        self.vec.get(pkid as usize)
+            .map(|opt| Ok(opt.as_ref()))
+            .unwrap_or_else(|| Err(OutOfBounds(pkid)))
     }
 
     /// Drains the `Publish` values into another vector, transforming them using a specified function.
     /// The transformation starts from the position specified by `last_puback`.
-    pub fn drain_into<T>(&mut self, vec: &mut Vec<T>, last_puback: usize, map: fn(Publish) -> T) {
-        let mut index = 0;
-        self.vec.iter_mut().for_each(|opt_publish| {
+   pub fn drain_into<T>(&mut self, vec: &mut Vec<T>, last_puback: usize, map: fn(Publish) -> T) {
+        for (index, opt_publish) in self.vec.iter_mut().enumerate() {
             if let Some(publish) = opt_publish.take() {
                 if index >= last_puback {
                     vec.push(map(publish));
                 }
             }
-            index += 1;
-        });
+        }
         self.vec.clear();
     }
 }
