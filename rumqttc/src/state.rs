@@ -106,22 +106,23 @@ impl MqttState {
     /// Returns inflight outgoing packets and clears internal queues
     pub fn clean(&mut self) -> Vec<Request> {
         let mut pending = Vec::with_capacity(self.inflight());
+        self.collect_pending_packets(&mut pending);
+        self.reset_state();
+        pending
+    }
 
-        // remove and collect pending publishes
+    fn collect_pending_packets(&mut self, pending: &mut Vec<Request>) {
         let last_puback = self.last_puback as usize + 1;
         self.outgoing_pub
-            .drain_into(&mut pending, last_puback, Request::Publish);
-
-        // remove and collect pending releases
+            .drain_into(pending, last_puback, Request::Publish);
         self.outgoing_rel
-            .drain_into(&mut pending, |pkid| Request::PubRel(PubRel::new(pkid)));
-
-        // remove packed ids of incoming qos2 publishes
+            .drain_into(pending, |pkid| Request::PubRel(PubRel::new(pkid)));
         self.incoming_pub.clear();
+    }
 
+    fn reset_state(&mut self) {
         self.await_pingresp = false;
         self.collision_ping_count = 0;
-        pending
     }
 
     /// Number of outgoing inflight publishes
@@ -239,33 +240,22 @@ impl MqttState {
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<Option<Packet>, StateError> {
         if self.outgoing_pub.remove(pubrec.pkid)?.is_none() {
-            error!("Unsolicited pubrec packet: {:?}", pubrec.pkid);
             return Err(StateError::Unsolicited(pubrec.pkid));
         }
-
-        // NOTE: Inflight - 1 for qos2 in comp
-        let _ = self.outgoing_rel.insert(pubrec.pkid);
-        let pubrel = PubRel { pkid: pubrec.pkid };
+        self.outgoing_rel.insert(pubrec.pkid)?;
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);
-
-        Ok(Some(Packet::PubRel(pubrel)))
+        Ok(Some(Packet::PubRel(PubRel::new(pubrec.pkid))))
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
-        let pkid = pubrel.pkid;
-
-        let had_pkid = self.incoming_pub.remove(pkid)?;
-        if !had_pkid {
-            error!("Unsolicited pubrel packet: {:?}", pubrel.pkid);
-            return Err(StateError::Unsolicited(pkid));
+        if self.incoming_pub.remove(pubrel.pkid)? {
+            let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
+            self.events.push_back(event);
+            Ok(Some(Packet::PubComp(PubComp::new(pubrel.pkid))))
+        } else {
+            Err(StateError::Unsolicited(pubrel.pkid))
         }
-
-        let event = Event::Outgoing(Outgoing::PubComp(pkid));
-        let pubcomp = PubComp { pkid };
-        self.events.push_back(event);
-
-        Ok(Some(Packet::PubComp(pubcomp)))
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
