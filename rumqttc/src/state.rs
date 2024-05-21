@@ -303,11 +303,7 @@ impl MqttState {
             }
 
             let pkid = publish.pkid;
-            // if there is an existing publish at this pkid, this implies that client
-            // hasn't acked this packet yet. `next_pkid()` rolls packet id back to 1
-            // after a count of 'inflight' messages. this error is possible only when
-            // client isn't acking sequentially
-            if let Some(_) = self.outgoing_pub.get(pkid)? {
+            if self.outgoing_pub.get(pkid)?.is_some() {
                 info!("Collision on packet id = {:?}", publish.pkid);
                 self.collision = Some(publish);
                 let event = Event::Outgoing(Outgoing::AwaitAck(pkid));
@@ -318,7 +314,7 @@ impl MqttState {
             // if there is an existing publish at this pkid, this implies that broker hasn't acked this
             // packet yet. This error is possible only when broker isn't acking sequentially
             self.outgoing_pub.insert(publish.clone())?;
-        }
+        };
 
         debug!(
             "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
