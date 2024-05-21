@@ -269,7 +269,10 @@ impl MqttState {
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
-        if !self.outgoing_rel.remove(pubcomp.pkid)? {
+        let pkid = pubcomp.pkid;
+
+        let had_pkid = self.outgoing_rel.remove(pkid)?;
+        if !had_pkid {
             error!("Unsolicited pubcomp packet: {:?}", pubcomp.pkid);
             return Err(StateError::Unsolicited(pubcomp.pkid));
         }
