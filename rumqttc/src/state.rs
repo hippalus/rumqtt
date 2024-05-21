@@ -262,7 +262,7 @@ impl MqttState {
         }
 
         let event = Event::Outgoing(Outgoing::PubComp(pkid));
-        let pubcomp = PubComp { pkid: pkid };
+        let pubcomp = PubComp { pkid };
         self.events.push_back(event);
 
         Ok(Some(Packet::PubComp(pubcomp)))
@@ -440,8 +440,7 @@ impl MqttState {
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
         if let Some(publish) = &self.collision {
             if publish.pkid == pkid {
-                self.collision.take();
-                return self.outgoing_pub.remove(pkid).unwrap_or(None);
+                return self.collision.take();
             }
         }
 
