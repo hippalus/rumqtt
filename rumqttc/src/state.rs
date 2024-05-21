@@ -216,12 +216,16 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<Option<Packet>, StateError> {
+        if self.outgoing_pub.remove(puback.pkid)?.is_none() {
+            error!("Unsolicited puback packet: {:?}", puback.pkid);
+            return Err(StateError::Unsolicited(puback.pkid));
+        }
+
         self.last_puback = puback.pkid;
 
-        let pkid = puback.pkid;
-
         let packet = self.check_collision(puback.pkid).map(|publish| {
-            debug_assert_eq!(publish.pkid, pkid);
+            debug_assert_eq!(publish.pkid, puback.pkid);
+
             let _ = self.outgoing_pub.insert(publish.clone());
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
             self.events.push_back(event);
@@ -230,13 +234,7 @@ impl MqttState {
             Packet::Publish(publish)
         });
 
-        match self.outgoing_pub.remove(puback.pkid)? {
-            Some(_) => Ok(packet),
-            None => {
-                error!("Unsolicited puback packet: {:?}", puback.pkid);
-                Err(StateError::Unsolicited(puback.pkid))
-            }
-        }
+        Ok(packet)
     }
 
     fn handle_incoming_pubrec(&mut self, pubrec: &PubRec) -> Result<Option<Packet>, StateError> {
