@@ -3,7 +3,7 @@ use std::{io, time::Instant};
 
 use crate::ds::{OutOfBounds, OutgoingPublishBucket, PkidSet};
 use crate::mqttbytes::v4::*;
-use crate::mqttbytes::{self, *};
+use crate::mqttbytes::*;
 use crate::{Event, Incoming, Outgoing, Request};
 
 /// Errors during state handling
@@ -29,7 +29,7 @@ pub enum StateError {
     #[error("A Subscribe packet must contain atleast one filter")]
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
-    Deserialization(#[from] mqttbytes::Error),
+    Deserialization(#[from] Error),
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
     #[error("Received paket id is out of bounds")]
@@ -217,15 +217,16 @@ impl MqttState {
     }
 
     fn handle_incoming_puback(&mut self, puback: &PubAck) -> Result<Option<Packet>, StateError> {
-        if self.outgoing_pub.remove(puback.pkid)?.is_none() {
-            error!("Unsolicited puback packet: {:?}", puback.pkid);
-            return Err(StateError::Unsolicited(puback.pkid));
+        let pkid = puback.pkid;
+        if self.outgoing_pub.remove(pkid)?.is_none() {
+            error!("Unsolicited puback packet: {:?}", pkid);
+            return Err(StateError::Unsolicited(pkid));
         }
 
-        self.last_puback = puback.pkid;
+        self.last_puback = pkid;
 
-        let packet = self.check_collision(puback.pkid).map(|publish| {
-            debug_assert_eq!(publish.pkid, puback.pkid);
+        let packet = self.check_collision(pkid).map(|publish| {
+            debug_assert_eq!(publish.pkid, pkid);
 
             let _ = self.outgoing_pub.insert(publish.clone());
             let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
