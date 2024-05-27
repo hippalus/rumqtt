@@ -90,7 +90,7 @@ impl MqttState {
             max_inflight,
             // index 0 is wasted as 0 is not a valid packet id
             outgoing_pub: vec![None; max_inflight as usize + 1],
-            outgoing_rel: FixedBitSet::with_capacity(max_inflight as usize + 1),
+            outgoing_rel: FixedBitSet::with_capacity(u16::MAX as usize + 1),
             incoming_pub: FixedBitSet::with_capacity(u16::MAX as usize + 1),
             collision: None,
             // TODO: Optimize these sizes later
